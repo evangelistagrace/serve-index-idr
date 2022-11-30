@@ -249,24 +249,26 @@ function createHtmlFileList(files, dir, useIcons, view) {
 
   html += files.map(function (file) {
     var classes = [];
+    var faIcon = '';
     var isDir = file.stat && file.stat.isDirectory();
     var path = dir.split('/').map(function (c) { return encodeURIComponent(c); });
 
     if (useIcons) {
-      classes.push('icon');
+      // classes.push('icon');
 
       if (isDir) {
-        classes.push('icon-directory');
+        // classes.push('icon-directory');
+        faIcon = '<i class="far fa-folder-open"></i>'
       } else {
         var ext = extname(file.name);
-        var icon = iconLookup(file.name);
+        // var icon = iconLookup(file.name);
+        faIcon = '<i class="far fa-file"></i>'
+        // classes.push('icon');
+        // classes.push('icon-' + ext.substring(1));
 
-        classes.push('icon');
-        classes.push('icon-' + ext.substring(1));
-
-        if (classes.indexOf(icon.className) === -1) {
-          classes.push(icon.className);
-        }
+        // if (classes.indexOf(icon.className) === -1) {
+        //   classes.push(icon.className);
+        // }
       }
     }
 
@@ -283,6 +285,7 @@ function createHtmlFileList(files, dir, useIcons, view) {
       + escapeHtml(normalizeSlashes(normalize(path.join('/'))))
       + '" class="' + escapeHtml(classes.join(' ')) + '"'
       + ' title="' + escapeHtml(file.name) + '">'
+      + faIcon
       + '<span class="name">' + escapeHtml(file.name) + '</span>'
       + '<span class="size">' + escapeHtml(size) + '</span>'
       + '<span class="date">' + escapeHtml(date) + '</span>'
@@ -337,6 +340,9 @@ function fileSort(a, b) {
 
 function htmlPath(dir) {
   var parts = dir.split('/');
+
+  parts = parts.filter(part => part !== 'idr' && part !== 'reports')
+
   var crumb = new Array(parts.length);
 
   for (var i = 0; i < parts.length; i++) {
@@ -344,7 +350,7 @@ function htmlPath(dir) {
 
     if (part) {
       parts[i] = encodeURIComponent(part);
-      crumb[i] = '<a href="' + escapeHtml(parts.slice(0, i + 1).join('/')) + '">' + escapeHtml(part) + '</a>';
+      crumb[i] = '<a href="/idr/reports' + escapeHtml(parts.slice(0, i + 1).join('/')) + '">' + escapeHtml(part) + '</a>';
     }
   }
 
