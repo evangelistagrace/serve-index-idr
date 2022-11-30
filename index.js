@@ -107,10 +107,14 @@ function serveIndex(root, options) {
       return;
     }
 
+    // get dir
+    var dir = getRequestedDir(req)
+
+    // bad request
+    if (dir === null) return next(createError(400))
+
     // parse URLs
-    var url = parseUrl(req);
     var originalUrl = parseUrl.original(req);
-    var dir = decodeURIComponent(url.pathname);
     var originalDir = decodeURIComponent(originalUrl.pathname);
 
     // join / normalize from root dir
@@ -152,8 +156,6 @@ function serveIndex(root, options) {
         if (filter) files = files.filter(function(filename, index, list) {
           return filter(filename, index, list, path);
         });
-        //filter folders by user permission
-        if (dir == '/') files = files.filter(file => req.session.key['permissions'].includes(file))
         files.sort();
 
         // content-negotiation
@@ -182,13 +184,8 @@ serveIndex.html = function _html(req, res, files, next, dir, showUp, icons, path
   }
 
   // stat all files
-  stat(path, files, function (err, stats) {
+  stat(path, files, function (err, fileList) {
     if (err) return next(err);
-
-    // combine the stats into the file list
-    var fileList = files.map(function (file, i) {
-      return { name: file, stat: stats[i] };
-    });
 
     // sort file list
     fileList.sort(fileSort);
@@ -204,8 +201,7 @@ serveIndex.html = function _html(req, res, files, next, dir, showUp, icons, path
         fileList: fileList,
         path: path,
         style: style,
-        viewName: view,
-        username: req.session.key['uid']
+        viewName: view
       };
 
       // render html
@@ -221,16 +217,42 @@ serveIndex.html = function _html(req, res, files, next, dir, showUp, icons, path
  * Respond with application/json.
  */
 
-serveIndex.json = function _json(req, res, files) {
-  send(res, 'application/json', JSON.stringify(files))
+serveIndex.json = function _json (req, res, files, next, dir, showUp, icons, path) {
+  // stat all files
+  stat(path, files, function (err, fileList) {
+    if (err) return next(err)
+
+    // sort file list
+    fileList.sort(fileSort)
+
+    // serialize
+    var body = JSON.stringify(fileList.map(function (file) {
+      return file.name
+    }))
+
+    send(res, 'application/json', body)
+  })
 };
 
 /**
  * Respond with text/plain.
  */
 
-serveIndex.plain = function _plain(req, res, files) {
-  send(res, 'text/plain', (files.join('\n') + '\n'))
+serveIndex.plain = function _plain (req, res, files, next, dir, showUp, icons, path) {
+  // stat all files
+  stat(path, files, function (err, fileList) {
+    if (err) return next(err)
+
+    // sort file list
+    fileList.sort(fileSort)
+
+    // serialize
+    var body = fileList.map(function (file) {
+      return file.name
+    }).join('\n') + '\n'
+
+    send(res, 'text/plain', body)
+  })
 };
 
 /**
@@ -240,7 +262,7 @@ serveIndex.plain = function _plain(req, res, files) {
 
 function createHtmlFileList(files, dir, useIcons, view) {
   var html = '<ul id="files" class="view-' + escapeHtml(view) + '">'
-    + (view == 'details' ? (
+    + (view === 'details' ? (
       '<li class="header">'
       + '<span class="name">Name</span>'
       + '<span class="size">Size</span>'
@@ -249,26 +271,24 @@ function createHtmlFileList(files, dir, useIcons, view) {
 
   html += files.map(function (file) {
     var classes = [];
-    var faIcon = '';
     var isDir = file.stat && file.stat.isDirectory();
     var path = dir.split('/').map(function (c) { return encodeURIComponent(c); });
 
     if (useIcons) {
-      // classes.push('icon');
+      classes.push('icon');
 
       if (isDir) {
-        // classes.push('icon-directory');
-        faIcon = '<i class="far fa-folder-open"></i>'
+        classes.push('icon-directory');
       } else {
         var ext = extname(file.name);
-        // var icon = iconLookup(file.name);
-        faIcon = '<i class="far fa-file"></i>'
-        // classes.push('icon');
-        // classes.push('icon-' + ext.substring(1));
+        var icon = iconLookup(file.name);
 
-        // if (classes.indexOf(icon.className) === -1) {
-        //   classes.push(icon.className);
-        // }
+        classes.push('icon');
+        classes.push('icon-' + ext.substring(1));
+
+        if (classes.indexOf(icon.className) === -1) {
+          classes.push(icon.className);
+        }
       }
     }
 
@@ -285,7 +305,6 @@ function createHtmlFileList(files, dir, useIcons, view) {
       + escapeHtml(normalizeSlashes(normalize(path.join('/'))))
       + '" class="' + escapeHtml(classes.join(' ')) + '"'
       + ' title="' + escapeHtml(file.name) + '">'
-      + faIcon
       + '<span class="name">' + escapeHtml(file.name) + '</span>'
       + '<span class="size">' + escapeHtml(size) + '</span>'
       + '<span class="date">' + escapeHtml(date) + '</span>'
@@ -311,8 +330,7 @@ function createHtmlRender(template) {
         .replace(/\{style\}/g, locals.style.concat(iconStyle(locals.fileList, locals.displayIcons)))
         .replace(/\{files\}/g, createHtmlFileList(locals.fileList, locals.directory, locals.displayIcons, locals.viewName))
         .replace(/\{directory\}/g, escapeHtml(locals.directory))
-        .replace(/\{linked-path\}/g, htmlPath(locals.directory))
-        .replace(/\{username\}/g, (locals.username));
+        .replace(/\{linked-path\}/g, htmlPath(locals.directory));
 
       callback(null, body);
     });
@@ -335,14 +353,27 @@ function fileSort(a, b) {
 }
 
 /**
+ * Get the requested directory from request.
+ *
+ * @param req
+ * @return {string}
+ * @api private
+ */
+
+function getRequestedDir (req) {
+  try {
+    return decodeURIComponent(parseUrl(req).pathname)
+  } catch (e) {
+    return null
+  }
+}
+
+/**
  * Map html `dir`, returning a linked path.
  */
 
 function htmlPath(dir) {
   var parts = dir.split('/');
-
-  parts = parts.filter(part => part !== 'idr' && part !== 'reports')
-
   var crumb = new Array(parts.length);
 
   for (var i = 0; i < parts.length; i++) {
@@ -350,7 +381,7 @@ function htmlPath(dir) {
 
     if (part) {
       parts[i] = encodeURIComponent(part);
-      crumb[i] = '<a href="/idr/reports' + escapeHtml(parts.slice(0, i + 1).join('/')) + '">' + escapeHtml(part) + '</a>';
+      crumb[i] = '<a href="' + escapeHtml(parts.slice(0, i + 1).join('/')) + '">' + escapeHtml(part) + '</a>';
     }
   }
 
@@ -385,7 +416,7 @@ function iconLookup(filename) {
   // try by mime type
   if (icons[mimetype]) {
     return {
-      className: 'icon-' + mimetype.replace('/', '-'),
+      className: 'icon-' + mimetype.replace('/', '-').replace('+', '_'),
       fileName: icons[mimetype]
     };
   }
@@ -495,7 +526,7 @@ function normalizeSlashes(path) {
 
 function removeHidden(files) {
   return files.filter(function(file){
-    return '.' != file[0];
+    return file[0] !== '.'
   });
 }
 
@@ -517,8 +548,12 @@ function send (res, type, body) {
 }
 
 /**
- * Stat all files and return array of stat
- * in same order.
+ * Stat all files and return array of objects in the form
+ * `{ name, stat }`.
+ *
+ * @param {Array} files
+ * @return {Array}
+ * @api private
  */
 
 function stat(dir, files, cb) {
@@ -532,7 +567,10 @@ function stat(dir, files, cb) {
         if (err && err.code !== 'ENOENT') return done(err);
 
         // pass ENOENT as null stat, not error
-        done(null, stat || null);
+        done(null, {
+          name: file,
+          stat: stat || null
+        })
       });
     });
   });
@@ -550,6 +588,7 @@ var icons = {
   'folder': 'folder.png',
 
   // generic mime type icons
+  'font': 'font.png',
   'image': 'image.png',
   'text': 'page_white_text.png',
   'video': 'film.png',
@@ -560,7 +599,6 @@ var icons = {
   '+zip': 'box.png',
 
   // specific mime type icons
-  'application/font-woff': 'font.png',
   'application/javascript': 'page_white_code_red.png',
   'application/json': 'page_white_code.png',
   'application/msword': 'page_white_word.png',
@@ -574,7 +612,6 @@ var icons = {
   'application/vnd.oasis.opendocument.text': 'page_white_word.png',
   'application/x-7z-compressed': 'box.png',
   'application/x-sh': 'application_xp_terminal.png',
-  'application/x-font-ttf': 'font.png',
   'application/x-msaccess': 'page_white_database.png',
   'application/x-shockwave-flash': 'page_white_flash.png',
   'application/x-sql': 'page_white_database.png',
@@ -628,7 +665,6 @@ var icons = {
   '.map': 'map.png',
   '.msi': 'box.png',
   '.mv4': 'film.png',
-  '.otf': 'font.png',
   '.pdb': 'page_white_database.png',
   '.php': 'page_white_php.png',
   '.pl': 'page_white_code.png',

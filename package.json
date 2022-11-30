@@ -1,5 +1,5 @@
 {
-  "name": "serve-index-idr",
+  "name": "serve-index",
   "description": "Serve directory listings",
   "version": "1.9.1",
   "author": "Douglas Christopher Wilson <doug@somethingdoug.com>",
